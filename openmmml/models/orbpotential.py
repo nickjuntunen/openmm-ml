@@ -72,6 +72,7 @@ class OrbPotentialImpl(MLPotentialImpl):
         forceGroup: int,
         charge: int = 0,
         multiplicity: int = 1,
+        precision: str = "float32-highest",
         **args
     ) -> None:
 
@@ -90,7 +91,7 @@ class OrbPotentialImpl(MLPotentialImpl):
         if self.name not in orb.ORB_PRETRAINED_MODELS:
             raise ValueError(f"Unsupported Orb model: {self.name}")
         device = self._getTorchDevice(args)
-        model, adapter = orb.ORB_PRETRAINED_MODELS[self.name](device=device, precision="float32-highest")
+        model, adapter = orb.ORB_PRETRAINED_MODELS[self.name](device=device, precision=precision)
         conservative = isinstance(model, ConservativeForcefieldRegressor)
 
         # Get the atoms that should be included.

@@ -73,11 +73,13 @@ class OrbPotentialImpl(MLPotentialImpl):
         charge: int = 0,
         multiplicity: int = 1,
         precision: str = "float32-highest",
+        d3_correction: bool = False,
         **args
     ) -> None:
 
         try:
             from orb_models.forcefield import pretrained as orb
+            from orb_models.forcefield.inference.d3_model import D3SumModel, AlchemiDFTD3
             from orb_models.forcefield.models.conservative_regressor import ConservativeForcefieldRegressor
         except ImportError:
             raise ImportError("Failed to import orb-models: for installation instructions, visit https://github.com/orbital-materials/orb-models")
@@ -92,8 +94,12 @@ class OrbPotentialImpl(MLPotentialImpl):
             raise ValueError(f"Unsupported Orb model: {self.name}")
         device = self._getTorchDevice(args)
         model, adapter = orb.ORB_PRETRAINED_MODELS[self.name](device=device, precision=precision)
-        conservative = isinstance(model, ConservativeForcefieldRegressor)
 
+        if d3_correction:
+            model = D3SumModel(model, AlchemiDFTD3(functional="PBE", damping="BJ", compile=True))
+
+        conservative = isinstance(model, ConservativeForcefieldRegressor)
+        
         # Get the atoms that should be included.
         includedAtoms = list(topology.atoms())
         indices = None
@@ -120,6 +126,10 @@ class OrbPotentialImpl(MLPotentialImpl):
 def _computeOrb(state, atoms, indices, periodic, device, model, adapter, conservative):
     import ase.units
     import numpy as np
+    try:
+        from orb_models.forcefield.inference.d3_model import D3SumModel
+    except ImportError:
+        raise ImportError("Failed to import orb-models: for installation instructions, visit https://github.com/yourusername/orb-models")
 
     positions = state.getPositions(asNumpy=True).value_in_unit(unit.angstrom)
     numAtoms = positions.shape[0]
@@ -131,7 +141,14 @@ def _computeOrb(state, atoms, indices, periodic, device, model, adapter, conserv
 
     result = model.predict(adapter.from_ase_atoms(atoms, device=device))
     energy = result["energy"].item()
-    forces = result[model.grad_forces_name if conservative else "forces"].numpy(force=True)
+    # import pdb; pdb.set_trace()
+    if conservative:
+        forces_key = model.grad_forces_name
+    elif isinstance(model, D3SumModel):
+        forces_key = "grad_forces"
+    else:
+        forces_key = "forces"
+    forces = result[forces_key].numpy(force=True)
     if indices is not None:
         f = np.zeros((numAtoms, 3), dtype=forces.dtype)
         f[indices] = forces
